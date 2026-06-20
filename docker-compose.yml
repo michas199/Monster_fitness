@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+
+  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: mf_nginx
+    ports:
+      - "80:80"
+      # - "443:443"   # Habilitar com certificado SSL em produção
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./static:/app/static:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - mf_net
+
+  # ── Flask API ────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mf_api
+    environment:
+      - FLASK_DEBUG=false
+      - SECRET_KEY=${SECRET_KEY:-supersecret_mude_em_producao}
+      - JWT_SECRET=${JWT_SECRET:-jwtsecret_mude_em_producao}
+      - JWT_EXPIRY_HOURS=8
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=monsterfitness
+      - DB_USER=mf_user
+      - DB_PASSWORD=${DB_PASSWORD:-mf_secret_2025}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mf_net
+    expose:
+      - "5000"
+
+  # ── MySQL ────────────────────────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: mf_db
+    environment:
+      MYSQL_DATABASE:      monsterfitness
+      MYSQL_USER:          mf_user
+      MYSQL_PASSWORD:      ${DB_PASSWORD:-mf_secret_2025}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootsecret_2025}
+    volumes:
+      - mf_db_data:/var/lib/mysql
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "mf_user",
+             "--password=${DB_PASSWORD:-mf_secret_2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - mf_net
+    expose:
+      - "3306"    # Não expõe externamente por segurança
+
+volumes:
+  mf_db_data:
+    driver: local
+
+networks:
+  mf_net:
+    driver: bridge
